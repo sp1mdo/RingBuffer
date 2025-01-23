@@ -92,7 +92,7 @@ public:
     {
         std::unique_lock<std::mutex> mlock(mutex_);
         auto ret = data_[front_ % N];
-        front_++; // pop front
+        front_ = (front_+1) % N; // pop front
         return ret;
     }
 
@@ -101,7 +101,7 @@ public:
         {
             std::unique_lock<std::mutex> mlock(mutex_);
             data_[back_ % N] = other;
-            back_++;
+            back_ = (back_ + 1) % N;;
         }
         cond_.notify_one();
     }
@@ -111,7 +111,7 @@ public:
         {
             std::unique_lock<std::mutex> mlock(mutex_);
             data_[back_ % N] = std::move(other);
-            back_++;
+            back_ = (back_ + 1) % N;;
         }
         cond_.notify_one();
     }
@@ -119,7 +119,7 @@ public:
     void pop_front(void)
     {
         std::unique_lock<std::mutex> mlock(mutex_);
-        front_++;
+        front_ = (front_+1) % N; // pop front
     }
 
     bool empty() const
