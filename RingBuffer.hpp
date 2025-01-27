@@ -38,6 +38,11 @@ public:
         }
     };
 
+    RingBuffer(T *ptr) : front_(0), back_(0), heap_(nullptr)
+    {
+        data_ = ptr;
+    };
+
     ~RingBuffer()
     {
         if (memoryType_ == MemoryType::Heap)
@@ -47,11 +52,6 @@ public:
             heap_ = nullptr;
             data_ = nullptr;
         }
-    }
-
-    constexpr size_t size(T (&)[N])
-    {
-        return N;
     }
 
     void dump()
@@ -64,75 +64,93 @@ public:
 
     value_type front() const
     {
-        std::lock_guard<std::mutex> mlock(mutex_);
+        std::unique_lock<std::mutex> mlock(m_popMutex);
         return data_[front_ % N];
     }
 
     value_type back() const
     {
-        std::lock_guard<std::mutex> mlock(mutex_);
+        std::unique_lock<std::mutex> mlock(m_popMutex);
         return data_[back_ % N];
     }
 
     value_type move_and_pop()
     {
-        std::unique_lock<std::mutex> mlock(mutex_);
-        while (empty())
+        value_type ret;
         {
-            cond_.wait(mlock);
-        }
+            std::unique_lock<std::mutex> mlock(m_popMutex);
+            while (empty())
+            {
+                m_popCV.wait(mlock);
+            }
 
-        // auto ret = std::move(data_.front());
-        auto ret = front();
-        pop_front();
+            ret = std::move(front());
+            pop_front();
+        }
+        m_pushCV.notify_one();
+
         return ret;
     }
 
     value_type pull_front()
     {
-        std::unique_lock<std::mutex> mlock(mutex_);
-        auto ret = data_[front_ % N];
-        front_ = (front_+1) % N; // pop front
+        value_type ret;
+        {
+            std::unique_lock<std::mutex> mlock(m_popMutex);
+            ret = data_[front_ % N];
+            front_ = (front_ + 1) % N; // pop front
+        }
+        m_pushCV.notify_one();
         return ret;
     }
 
     void push_back(const T &other)
     {
+        std::unique_lock<std::mutex> mlock(m_pushMutex);
+        while (full())
         {
-            std::unique_lock<std::mutex> mlock(mutex_);
-            data_[back_ % N] = other;
-            back_ = (back_ + 1) % N;;
+            m_pushCV.wait(mlock);
         }
-        cond_.notify_one();
+
+        data_[back_ % N] = other;
+        back_ = (back_ + 1) % N;
+        
+        m_popCV.notify_one();
     }
 
     void push_back(T &&other)
     {
         {
-            std::unique_lock<std::mutex> mlock(mutex_);
+            std::unique_lock<std::mutex> mlock(m_pushMutex);
+            while (full())
+            {
+                m_pushCV.wait(mlock);
+            }
             data_[back_ % N] = std::move(other);
-            back_ = (back_ + 1) % N;;
+            back_ = (back_ + 1) % N;
         }
-        cond_.notify_one();
+        m_popCV.notify_one();
     }
 
     void pop_front(void)
     {
-        std::unique_lock<std::mutex> mlock(mutex_);
-        front_ = (front_+1) % N; // pop front
+        {
+            std::unique_lock<std::mutex> mlock(m_popMutex);
+            front_ = (front_ + 1) % N;
+        }
+        m_pushCV.notify_one();
     }
 
     bool empty() const
     {
-        std::unique_lock<std::mutex> mlock(mutex_);
+        std::unique_lock<std::mutex> mlock(m_popMutex);
         return front_ == back_;
     }
 
     bool full() const
     {
         bool rbool;
-        std::unique_lock<std::mutex> mlock(mutex_);
-        // return (front_ - 1 == back_);
+        std::unique_lock<std::mutex> mlock(m_popMutex);
 
         if (front_ > 0)
             rbool = (back_ == (front_ - 1)) ? true : false;
@@ -141,33 +159,28 @@ public:
 
         return rbool;
     }
-    /*
-    void lock()
-    {
-        mutex_.lock();
-    }
 
-    void unlock()
-    {
-        mutex_.unlock();
-    }
-*/
     void clear()
     {
-        std::unique_lock<std::mutex> mlock(mutex_);
+        {
+        std::unique_lock<std::mutex> mlock(m_popMutex);
         front_ = 0;
         back_ = 0;
+        }
+        m_pushCV.notify_one();
     }
 
     size_type size() const
     {
-        std::unique_lock<std::mutex> mlock(mutex_);
+        std::unique_lock<std::mutex> mlock(m_popMutex);
         return back_ - front_;
     }
 
 private:
-    mutable std::mutex mutex_;
-    std::condition_variable cond_;
+    mutable std::mutex m_popMutex;
+    mutable std::mutex m_pushMutex;
+    std::condition_variable m_popCV;
+    std::condition_variable m_pushCV;
     MemoryType memoryType_;
     size_t front_;
     size_t back_;
