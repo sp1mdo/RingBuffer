@@ -31,9 +31,10 @@ public:
         }
         else
         {
-            std::cout << "Using heap for storage" << std::endl;
+            std::cout << "Using heap for storage\n" ;
             memoryType_ = MemoryType::Heap;
-            heap_ = new value_type[N];
+            data_ptr_ = std::make_unique<value_type[]>(N);
+            heap_ = data_ptr_.get();
             data_ = heap_;
         }
     };
@@ -45,13 +46,6 @@ public:
 
     ~RingBuffer()
     {
-        if (memoryType_ == MemoryType::Heap)
-        {
-            std::cout << "Releasing memory" << std::endl;
-            delete[] heap_;
-            heap_ = nullptr;
-            data_ = nullptr;
-        }
     }
 
     void dump()
@@ -59,7 +53,7 @@ public:
         for (size_t i = 0; i < N; i++)
             std::cout << data_[i] << ", ";
 
-        std::cout << std::endl;
+        std::cout << "\n";
     }
 
     value_type front() const
@@ -185,6 +179,7 @@ private:
     size_t front_;
     size_t back_;
     value_type stack_[N];
+    std::unique_ptr<value_type[]> data_ptr_;
     value_type *heap_;
     value_type *data_;
 };
