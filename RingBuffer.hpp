@@ -2,15 +2,12 @@
 #include <mutex>
 #include <thread>
 #include <condition_variable>
+#include <type_traits>
+#include <memory>
 
-enum class MemoryType
-{
-    Stack = 0,
-    Heap,
-};
 enum class StorageType { Static, Dynamic };
 
-template <typename T, std::size_t N>
+template <typename T, std::size_t N, StorageType S>
 class RingBuffer
 {
 public:
@@ -22,27 +19,19 @@ public:
     using const_pointer = const value_type *;
     using iterator = value_type *;
     using const_iterator = const value_type *;
+    using StorageContainer = std::conditional_t<S == StorageType::Static, std::array<T, N>, std::unique_ptr<T[]>>;
 
-    RingBuffer(MemoryType type = MemoryType::Stack) : front_(0), back_(0), heap_(nullptr)
+    RingBuffer() : front_(0), back_(0)
     {
-        if (type == MemoryType::Stack)
+        if constexpr (S == StorageType::Dynamic) // use heap allocated array as a container
         {
-            data_ = stack_;
-            memoryType_ = MemoryType::Stack;
+            data = std::make_unique<T[]>(N);
+            data_ = data.get();
         }
-        else
+        else // use std::array as a container
         {
-            std::cout << "Using heap for storage\n";
-            memoryType_ = MemoryType::Heap;
-            data_ptr_ = std::make_unique<value_type[]>(N);
-            heap_ = data_ptr_.get();
-            data_ = heap_;
+            data_ = &data[0];
         }
-    };
-
-    RingBuffer(T *ptr) : front_(0), back_(0), heap_(nullptr)
-    {
-        data_ = ptr;
     };
 
     ~RingBuffer()
@@ -69,7 +58,7 @@ public:
         return data_[back_ % N];
     }
 
-    value_type move_and_pop()
+    value_type move_and_pop() // use if  Typename has reasonable movable members.
     {
         value_type ret;
         {
@@ -184,11 +173,8 @@ private:
     mutable std::mutex m_pushMutex;
     std::condition_variable m_popCV;
     std::condition_variable m_pushCV;
-    MemoryType memoryType_;
     size_t front_;
     size_t back_;
-    value_type stack_[N];
-    std::unique_ptr<value_type[]> data_ptr_;
-    value_type *heap_;
+    StorageContainer data;
     value_type *data_;
 };

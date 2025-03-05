@@ -10,8 +10,7 @@ uint64_t g_sum{0};
 size_t g_NumberOfCompleted{0};
 std::mutex g_sumMutex;
 
-RingBuffer<int, 100> *g_buffer{nullptr};
-RingBuffer<int, 100> global_g_buffer(MemoryType::Stack);
+RingBuffer<int, 100, StorageType::Static> my_Fifo;
 size_t numberOfWorkers{0};
 uint64_t receivedSum{0};
 
@@ -21,7 +20,7 @@ void worker(int id)
     for (size_t i = 0; i < kElements; i++)
     {
         int number{static_cast<int>(i)};
-        g_buffer->push_back(number);
+        my_Fifo.push_back(number);
         sum = sum + number;
     }
 
@@ -30,10 +29,11 @@ void worker(int id)
         g_sum = g_sum + sum;
         g_NumberOfCompleted++;
     }
-    // printf("Im done %zu\n", g_NumberOfCompleted);
-    //g_buffer->m_popCV.notify_one();
 }
 
+// Observer thread has to interrupt the test, in case it is completed, because 
+// as per design pull() method is locked on condition variable, expecting
+// that forever there will be some data to be read from the queue
 void observer(void)
 {
     std::cout << "Observer thread started\n";
@@ -58,10 +58,6 @@ void observer(void)
 int main(int argc, char **argv)
 {
     numberOfWorkers = static_cast<size_t>(std::stoi(argv[1]));
-    int stack[kElements]; // Storage for the FIFO
-    // RingBuffer<int, 1000> local_g_buffer(stack);
-    // g_buffer = &local_g_buffer; // use for stack allocated fifo
-    g_buffer = &global_g_buffer; // use for heap allocated fifo
 
     std::thread([]()
                 { observer(); })
@@ -76,8 +72,7 @@ int main(int argc, char **argv)
 
     while (1)
     {
-        //int num = g_buffer->pull_front();
-        int num = g_buffer->move_and_pop();
+        int num = my_Fifo.pull_front();
         receivedSum = receivedSum + num;
     }
 
