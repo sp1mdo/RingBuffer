@@ -1,8 +1,6 @@
 #include <iostream>
 #include <thread>
 #include <vector>
-#include <unistd.h>
-#include <pthread.h>
 #include "RingBuffer.hpp"
 
 static constexpr uint64_t kElements{1000};

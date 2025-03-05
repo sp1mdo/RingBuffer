@@ -8,10 +8,9 @@ The project includes a test application (`ringbuffer_test.cpp`) that demonstrate
 
 ## Features
 - Thread-safe push and pull operations
-- Supports both static (`std::array`) and dynamic (`std::unique_ptr`) storage types (just pick of StorageType::Static or StorageType::Dynamic as the class template argument)
+- Supports both static (`std::array`) and dynamic (`std::unique_ptr`) storage types (just pick of `StorageType::Static` or `StorageType::Dynamic` as the class template argument)
 - Uses condition variables to manage synchronization between producer and consumer threads
-- Automatic cleanup and notification handling
-- in opposite to STL containers itavoids any further heap allocations during push and pull operations by simply moving/wraping read and write pointers around the storage
+- In opposite to typical STL containers it doesn't do any further heap allocations during push and pull operations by simply moving/wraping read and write pointers around the storage
 - Fixed-size buffer, meaning it can become full if not drained at a sufficient speed
 
 ## Build and Run Instructions
@@ -51,9 +50,6 @@ For example, to run with 100 worker threads:
 ```
 
 The application verifies thread safety by ensuring the sum of all pushed elements matches the sum of all pulled elements.
-
-## License
-This project is open-source and available under the MIT License.
 
 ## Contributions
 Contributions are welcome! Feel free to submit pull requests or report issues.

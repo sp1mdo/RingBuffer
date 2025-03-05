@@ -1,4 +1,3 @@
-#include <iostream>
 #include <mutex>
 #include <thread>
 #include <condition_variable>
@@ -25,12 +24,12 @@ public:
     {
         if constexpr (S == StorageType::Dynamic) // use heap allocated array as a container
         {
-            data = std::make_unique<T[]>(N);
-            data_ = data.get();
+            storage_ = std::make_unique<T[]>(N);
+            data_ = storage_.get();
         }
         else // use std::array as a container
         {
-            data_ = &data[0];
+            data_ = &storage_[0];
         }
     };
 
@@ -48,13 +47,13 @@ public:
 
     value_type front() const
     {
-        std::unique_lock<std::mutex> mlock(m_popMutex);
+        std::unique_lock<std::mutex> mlock(popMutex_);
         return data_[front_ % N];
     }
 
     value_type back() const
     {
-        std::unique_lock<std::mutex> mlock(m_popMutex);
+        std::unique_lock<std::mutex> mlock(popMutex_);
         return data_[back_ % N];
     }
 
@@ -62,16 +61,16 @@ public:
     {
         value_type ret;
         {
-            std::unique_lock<std::mutex> mlock(m_popMutex);
+            std::unique_lock<std::mutex> mlock(popMutex_);
             while (front_ == back_)
             {
-                m_popCV.wait(mlock);
+                popCV_.wait(mlock);
             }
 
             ret = std::move(data_[front_ % N]);
             front_ = (front_ + 1) % N; // pop front
         }
-        m_pushCV.notify_one();
+        pushCV_.notify_one();
 
         return ret;
     }
@@ -80,59 +79,59 @@ public:
     {
         value_type ret;
         {
-            std::unique_lock<std::mutex> mlock(m_popMutex);
+            std::unique_lock<std::mutex> mlock(popMutex_);
             while (front_ == back_)
             {
-                m_popCV.wait(mlock);
+                popCV_.wait(mlock);
             }
             ret = data_[front_ % N];
             front_ = (front_ + 1) % N; // pop front
         }
-        m_pushCV.notify_one();
+        pushCV_.notify_one();
         return ret;
     }
 
-    void push_back(const T &other)
+    void push_back(const value_type &other)
     {
-        std::unique_lock<std::mutex> mlock(m_pushMutex);
+        std::unique_lock<std::mutex> mlock(pushMutex_);
         {
             while (full_no_mutex())
             {
-                m_pushCV.wait(mlock);
+                pushCV_.wait(mlock);
             }
 
             data_[back_ % N] = other;
             back_ = (back_ + 1) % N;
         }
-        m_popCV.notify_one();
+        popCV_.notify_one();
     }
 
     void push_back(T &&other)
     {
         {
-            std::unique_lock<std::mutex> mlock(m_pushMutex);
+            std::unique_lock<std::mutex> mlock(pushMutex_);
             while (full())
             {
-                m_pushCV.wait(mlock);
+                pushCV_.wait(mlock);
             }
             data_[back_ % N] = std::move(other);
             back_ = (back_ + 1) % N;
         }
-        m_popCV.notify_one();
+        popCV_.notify_one();
     }
 
     void pop_front(void)
     {
         {
-            std::unique_lock<std::mutex> mlock(m_popMutex);
+            std::unique_lock<std::mutex> mlock(popMutex_);
             front_ = (front_ + 1) % N;
         }
-        m_pushCV.notify_one();
+        pushCV_.notify_one();
     }
 
     bool empty() const
     {
-        std::unique_lock<std::mutex> mlock(m_popMutex);
+        std::unique_lock<std::mutex> mlock(popMutex_);
         return front_ == back_;
     }
 
@@ -146,35 +145,36 @@ public:
 
         return rbool;
     }
+
     bool full() const
     {
-        std::unique_lock<std::mutex> mlock(m_popMutex);
+        std::unique_lock<std::mutex> mlock(popMutex_);
         return full_no_mutex();
     }
 
     void clear()
     {
         {
-            std::unique_lock<std::mutex> mlock(m_popMutex);
+            std::unique_lock<std::mutex> mlock(popMutex_);
             front_ = 0;
             back_ = 0;
         }
-        m_pushCV.notify_one();
+        pushCV_.notify_one();
     }
 
     size_type size() const
     {
-        std::unique_lock<std::mutex> mlock(m_popMutex);
+        std::unique_lock<std::mutex> mlock(popMutex_);
         return back_ - front_;
     }
 
 private:
-    mutable std::mutex m_popMutex;
-    mutable std::mutex m_pushMutex;
-    std::condition_variable m_popCV;
-    std::condition_variable m_pushCV;
+    mutable std::mutex popMutex_;
+    mutable std::mutex pushMutex_;
+    std::condition_variable popCV_;
+    std::condition_variable pushCV_;
     size_t front_;
     size_t back_;
-    StorageContainer data;
+    StorageContainer storage_;
     value_type *data_;
 };
