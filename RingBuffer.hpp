@@ -8,6 +8,7 @@ enum class MemoryType
     Stack = 0,
     Heap,
 };
+enum class StorageType { Static, Dynamic };
 
 template <typename T, std::size_t N>
 class RingBuffer
@@ -31,7 +32,7 @@ public:
         }
         else
         {
-            std::cout << "Using heap for storage\n" ;
+            std::cout << "Using heap for storage\n";
             memoryType_ = MemoryType::Heap;
             data_ptr_ = std::make_unique<value_type[]>(N);
             heap_ = data_ptr_.get();
@@ -48,7 +49,7 @@ public:
     {
     }
 
-    void dump()
+    void dump() const
     {
         for (size_t i = 0; i < N; i++)
             std::cout << data_[i] << ", ";
@@ -73,13 +74,13 @@ public:
         value_type ret;
         {
             std::unique_lock<std::mutex> mlock(m_popMutex);
-            while (empty())
+            while (front_ == back_)
             {
                 m_popCV.wait(mlock);
             }
 
-            ret = std::move(front());
-            pop_front();
+            ret = std::move(data_[front_ % N]);
+            front_ = (front_ + 1) % N; // pop front
         }
         m_pushCV.notify_one();
 
@@ -91,6 +92,10 @@ public:
         value_type ret;
         {
             std::unique_lock<std::mutex> mlock(m_popMutex);
+            while (front_ == back_)
+            {
+                m_popCV.wait(mlock);
+            }
             ret = data_[front_ % N];
             front_ = (front_ + 1) % N; // pop front
         }
@@ -101,14 +106,15 @@ public:
     void push_back(const T &other)
     {
         std::unique_lock<std::mutex> mlock(m_pushMutex);
-        while (full())
         {
-            m_pushCV.wait(mlock);
-        }
+            while (full_no_mutex())
+            {
+                m_pushCV.wait(mlock);
+            }
 
-        data_[back_ % N] = other;
-        back_ = (back_ + 1) % N;
-        
+            data_[back_ % N] = other;
+            back_ = (back_ + 1) % N;
+        }
         m_popCV.notify_one();
     }
 
@@ -141,11 +147,9 @@ public:
         return front_ == back_;
     }
 
-    bool full() const
+    bool full_no_mutex() const
     {
         bool rbool;
-        std::unique_lock<std::mutex> mlock(m_popMutex);
-
         if (front_ > 0)
             rbool = (back_ == (front_ - 1)) ? true : false;
         else
@@ -153,13 +157,18 @@ public:
 
         return rbool;
     }
+    bool full() const
+    {
+        std::unique_lock<std::mutex> mlock(m_popMutex);
+        return full_no_mutex();
+    }
 
     void clear()
     {
         {
-        std::unique_lock<std::mutex> mlock(m_popMutex);
-        front_ = 0;
-        back_ = 0;
+            std::unique_lock<std::mutex> mlock(m_popMutex);
+            front_ = 0;
+            back_ = 0;
         }
         m_pushCV.notify_one();
     }
