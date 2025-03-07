@@ -14,6 +14,7 @@ template <typename T, std::size_t N, StorageType S>
 class RingBuffer
 {
 public:
+    class Iterator;
     using value_type = T;
     using size_type = std::size_t;
     using StorageContainer = std::conditional_t<S == StorageType::Static, std::array<T, N>, std::unique_ptr<T[]>>;
@@ -57,7 +58,7 @@ public:
         return data_[back_ % N];
     }
 
-    // Returns the element at front of the queue and pops the element usinng moving constructor 
+    // Returns the element at front of the queue and pops the element usinng moving constructor
     // If it's applicable.
     // This is a blocking call, so if queue is empty
     // it will wait until there is something in the queue
@@ -133,6 +134,33 @@ public:
         popCV_.notify_one();
     }
 
+    // Push the element in way that if buffer is full
+    // It will overwrite the front of queue, so data at front 
+    // will be lost
+    void push_overwrite(const T &other)
+    {
+        {
+            std::unique_lock<std::mutex> mlock(pushMutex_);
+            data_[back_ % N] = other;
+            back_ = (back_ + 1) % N;
+            front_ = (front_ + 1) % N;
+        }
+        popCV_.notify_one();
+    }
+
+    // Push the element in way that if buffer is full
+    // It will overwrite the front of queue, so data at front 
+    // will be lost
+    void push_overwrite(T &&other)
+    {
+        {
+            std::unique_lock<std::mutex> mlock(pushMutex_);
+            data_[back_ % N] = std::move(other);
+            back_ = (back_ + 1) % N;
+            front_ = (front_ + 1) % N;
+        }
+        popCV_.notify_one();
+    }
     // Pops the element from the front of the queue
     void pop_front(void)
     {
@@ -157,7 +185,6 @@ public:
         return full_no_mutex();
     }
 
-
     // Clear all elements in the queue
     void clear()
     {
@@ -175,6 +202,56 @@ public:
         std::unique_lock<std::mutex> mlock(popMutex_);
         return back_ - front_;
     }
+
+    T &operator[](std::size_t index)
+    {
+        if (index >= size())
+            throw std::out_of_range("Index out of bounds");
+        return data_[(front_ + index) % N];
+    }
+
+    const T &operator[](std::size_t index) const
+    {
+        if (index >= size())
+            throw std::out_of_range("Index out of bounds");
+        return data_[(front_ + index) % N];
+    }
+
+    Iterator begin() { return Iterator(*this, front_); }
+    Iterator end() { return Iterator(*this, back_, true); }
+
+    class Iterator
+    {
+    private:
+        RingBuffer &cb;
+        std::size_t index;
+        bool at_end;
+
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = T;
+        using difference_type = std::ptrdiff_t;
+        using pointer = T *;
+        using reference = T &;
+
+        Iterator(RingBuffer &buffer, std::size_t start, bool end_flag = false)
+            : cb(buffer), index(start), at_end(end_flag) {}
+
+        T &operator*() { return cb.data_[index]; }
+        Iterator &operator++()
+        {
+            index = (index + 1) % N;
+            if (index == cb.back_)
+            {
+                at_end = true;
+            }
+            return *this;
+        }
+        bool operator!=(const Iterator &other) const
+        {
+            return index != other.index || at_end != other.at_end;
+        }
+    }; // End of Iterator Class
 
 private:
     bool full_no_mutex() const
